@@ -7,3 +7,5 @@ flash-attention环境需要提前在虚拟环境内编译（如果服务器总�
 
 GLM:
 source /root/DiabetesPDiagLLM/.diabetesPDiagLLMVenv/bin/activates
+
+lv1输出可用度在80%，lv2undertest
