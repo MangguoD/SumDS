@@ -34,6 +34,7 @@ def query_llm(prompt, max_new_tokens=1024):
             "content": (
                 "你是一名经验丰富的医疗文档结构化处理专家。请你参考以下“示例输入+输出”，"
                 "并严格按照“结构模板”对【实际输入】进行结构化整理，缺失项请写 none，不得更改格式。"
+                "必须完整输出所有 4 个结构段，否则视为无效。"
             )
         },
         {
@@ -105,6 +106,18 @@ def query_llm(prompt, max_new_tokens=1024):
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
+#    MAX_INPUT_TOKENS = 14000
+#    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+#    tokenized = tokenizer(text, return_tensors="pt", add_special_tokens=False)
+#    print("当前输入 token 数量：", tokenized["input_ids"].shape[1])
+#    input_ids = tokenized["input_ids"][0][:MAX_INPUT_TOKENS]
+#    attention_mask = tokenized["attention_mask"][0][:MAX_INPUT_TOKENS]
+
+#    inputs = {
+#        "input_ids": input_ids.unsqueeze(0).to(model.device),
+#        "attention_mask": attention_mask.unsqueeze(0).to(model.device)
+#    }
+
     with torch.no_grad():
         generated = model.generate(
             **inputs,
@@ -130,7 +143,8 @@ def is_valid_output(output, min_sections=4):
         "4. 生活方式"
     ]
     matched = [s for s in required_sections if s in output]
-    return len(matched) >= min_sections
+    matched_count = len(matched)
+    return matched_count, matched_count >= min_sections
 
 # 处理think部分
 def process_response(text):
@@ -157,12 +171,13 @@ except FileNotFoundError:
     df_out['response'] = ""
     processed_indices = set()
 
+# 容忍，失败重试
 error_records = []
 total = len(df)
 start_time = time.time()
 max_retries = 3
-token_steps = [1024, 1536, 2048]
-section_steps = [4, 3, 2]
+token_steps = [2048, 2048, 4096] # token长度 失败后增加，防止是因为数据过长导致
+section_steps = [4, 3, 2] # 容忍度 最小为二防止模型在一点里转死
 
 for i, row in df.iterrows():
     if i in processed_indices:
@@ -176,22 +191,31 @@ for i, row in df.iterrows():
             min_sections = section_steps[attempt]
 
             response = query_llm(prompt, max_new_tokens=max_tokens)
-            if is_valid_output(response, min_sections):
+            matched_count, is_valid = is_valid_output(response, min_sections)
+
+            if is_valid:
                 print(f"第 {attempt+1} 次尝试成功：结构至少有 {min_sections} 段")
                 df_out.at[i, 'response'] = response
+                df_out.at[i, 'status'] = "FULL"
+                break
+            elif matched_count >= 2:
+                print(f"第 {attempt+1} 次尝试部分成功：结构段落数量 = {matched_count}")
+                df_out.at[i, 'response'] = response
+                df_out.at[i, 'status'] = f"PARTIAL_{matched_count}"
                 break
             else:
                 print(f"[INVALID OUTPUT] 第 {attempt+1} 次尝试：结构不足 {min_sections} 段")
                 if attempt == max_retries - 1:
-                    err = f"[INVALID OUTPUT][RETRY_FAILED] 共尝试 {max_retries} 次失败"
+                    err = "[INVALID OUTPUT][RETRY_FAILED] 共尝试 3 次失败"
                     df_out.at[i, 'response'] = err
+                    df_out.at[i, 'status'] = "FAIL"
                     error_records.append((i, prompt, err))
-
         except Exception as e:
             print(f"[ERROR] 第 {attempt+1} 次尝试失败：{e}")
             if attempt == max_retries - 1:
                 err = f"[ERROR][RETRY_FAILED] {e}"
                 df_out.at[i, 'response'] = err
+                df_out.at[i, 'status'] = "ERROR"
                 error_records.append((i, prompt, err))
 
         torch.cuda.empty_cache()
