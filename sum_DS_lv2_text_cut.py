@@ -106,6 +106,7 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
     full_ids = system_ids + prefix_ids + raw_text_ids + suffix_ids
     return full_ids
 
+
 # 检查输出结构完整性
 def is_valid_output(output, min_sections=4):
     required_sections = [
@@ -116,6 +117,7 @@ def is_valid_output(output, min_sections=4):
     ]
     matched = [s for s in required_sections if s in output]
     return len(matched), len(matched) >= min_sections
+
 
 # 后处理部分
 def process_response(text):
@@ -152,6 +154,7 @@ def process_response(text):
 
     return "\n".join(deduped)
 
+    
 # 批处理部分
 def query_llm_batch(prompts, max_new_tokens=2048):
     MAX_INPUT_TOKENS = 8000
@@ -232,7 +235,8 @@ batch_size = 15 #控制批次大小
 error_records = []
 total = len(df)
 start_time = time.time()
-# 仍然给模型试错的机会，但是只充实，而不是温和模式
+
+# 标记输出情况，保留错误或截断输出，方便统计
 for start_idx in range(0, total, batch_size):
     end_idx = min(start_idx + batch_size, total)
     batch_indices = [i for i in range(start_idx, end_idx) if i not in processed_indices]
@@ -261,6 +265,7 @@ for start_idx in range(0, total, batch_size):
 
     completed = end_idx
     elapsed = time.time() - start_time
+    # 释放显存（这段真的很重要）
     torch.cuda.empty_cache()
     gc.collect()
     time.sleep(1) #确保显存释放干净（秒），如果还有爆显存的情况就加到1.25
