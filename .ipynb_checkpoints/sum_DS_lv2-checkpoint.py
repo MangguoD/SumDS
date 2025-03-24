@@ -105,9 +105,34 @@ def process_response(text):
 
 # 批处理主函数
 def query_llm_batch(prompts, max_new_tokens=1200):
+    MAX_INPUT_TOKENS = 8000  # 设置最大输入Token长度
+
     prompt_list = [tokenizer.apply_chat_template(build_prompt(p), tokenize=False, add_generation_prompt=True) for p in prompts]
-    encodings = tokenizer(prompt_list, return_tensors="pt", padding=True, truncation=True)
-    encodings = {k: v.to(device) for k, v in encodings.items()}
+
+    input_ids_list = []
+    attention_mask_list = []
+
+    for idx, prompt in enumerate(prompt_list):
+        tokenized = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+        input_ids = tokenized["input_ids"][0]
+
+        if input_ids.shape[0] > MAX_INPUT_TOKENS:
+            print(f"[截断警告] 第 {idx+1} 条 prompt 超过 {MAX_INPUT_TOKENS} 个 tokens，已截断为前 {MAX_INPUT_TOKENS} tokens")
+            input_ids = input_ids[:MAX_INPUT_TOKENS]
+
+        attention_mask = torch.ones_like(input_ids)
+        input_ids_list.append(input_ids)
+        attention_mask_list.append(attention_mask)
+
+    # Padding 成 batch
+    input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids_list, batch_first=True, padding_value=tokenizer.pad_token_id)
+    attention_mask_padded = torch.nn.utils.rnn.pad_sequence(attention_mask_list, batch_first=True, padding_value=0)
+
+    encodings = {
+        "input_ids": input_ids_padded.to(device),
+        "attention_mask": attention_mask_padded.to(device)
+    }
+
     with torch.no_grad():
         outputs = model.generate(
             **encodings,
@@ -121,8 +146,9 @@ def query_llm_batch(prompts, max_new_tokens=1200):
         )
 
     results = []
-    for i in range(len(prompts)):
-        gen_ids = outputs[i][encodings["input_ids"].shape[1]:]
+    input_lengths = (encodings["attention_mask"] == 1).sum(dim=1)
+    for i, input_len in enumerate(input_lengths):
+        gen_ids = outputs[i][input_len:]
         text = tokenizer.decode(gen_ids, skip_special_tokens=True)
         results.append(process_response(text))
     return results

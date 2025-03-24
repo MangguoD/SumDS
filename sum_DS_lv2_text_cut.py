@@ -3,6 +3,10 @@ import torch
 import pandas as pd
 import gc
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import warnings
+from torch.nn.functional import pad  # 左padding库
+
+warnings.filterwarnings("ignore") # 忽略警告,无视风险,继续运行
 
 print("开始运行程序...")
 
@@ -16,8 +20,13 @@ def get_attn_implementation():
 
 attn_impl = get_attn_implementation()
 
-# 模型加载
-tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+# 模型加载 左截断
+tokenizer = AutoTokenizer.from_pretrained(
+    model_name,
+    trust_remote_code=True,
+    padding_side="left"  # 必须在这里设置
+)
+
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     trust_remote_code=True,
@@ -105,28 +114,46 @@ def process_response(text):
 
 # 批处理主函数
 def query_llm_batch(prompts, max_new_tokens=1200):
-    MAX_INPUT_TOKENS = 8000  # 设置最大输入Token长度
+    MAX_INPUT_TOKENS = 8000
 
-    prompt_list = [tokenizer.apply_chat_template(build_prompt(p), tokenize=False, add_generation_prompt=True) for p in prompts]
+    prompt_list = [
+        tokenizer.apply_chat_template(
+            build_prompt(p), tokenize=False, add_generation_prompt=True
+        ) for p in prompts
+    ]
 
     input_ids_list = []
     attention_mask_list = []
 
-    for idx, prompt in enumerate(prompt_list):
-        tokenized = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    for idx, p in enumerate(prompt_list):
+        tokenized = tokenizer(p, return_tensors="pt", add_special_tokens=False)
         input_ids = tokenized["input_ids"][0]
 
+        # 截断过长 prompt
         if input_ids.shape[0] > MAX_INPUT_TOKENS:
-            print(f"[截断警告] 第 {idx+1} 条 prompt 超过 {MAX_INPUT_TOKENS} 个 tokens，已截断为前 {MAX_INPUT_TOKENS} tokens")
+            print(f"[截断警告] 第 {idx} 条 prompt 超过 {MAX_INPUT_TOKENS} 个 tokens，已截断为前 {MAX_INPUT_TOKENS} tokens")
             input_ids = input_ids[:MAX_INPUT_TOKENS]
 
         attention_mask = torch.ones_like(input_ids)
         input_ids_list.append(input_ids)
         attention_mask_list.append(attention_mask)
 
-    # Padding 成 batch
-    input_ids_padded = torch.nn.utils.rnn.pad_sequence(input_ids_list, batch_first=True, padding_value=tokenizer.pad_token_id)
-    attention_mask_padded = torch.nn.utils.rnn.pad_sequence(attention_mask_list, batch_first=True, padding_value=0)
+    # 左 padding 实现部分 
+    def left_pad(tensor, target_len, pad_value):
+        pad_len = target_len - tensor.size(0)
+        if pad_len <= 0:
+            return tensor
+        return pad(tensor, (pad_len, 0), value=pad_value)
+
+    max_len = max(seq.size(0) for seq in input_ids_list)
+
+    input_ids_padded = torch.stack([
+        left_pad(seq, max_len, tokenizer.pad_token_id) for seq in input_ids_list
+    ])
+
+    attention_mask_padded = torch.stack([
+        left_pad(seq, max_len, 0) for seq in attention_mask_list
+    ])
 
     encodings = {
         "input_ids": input_ids_padded.to(device),
@@ -138,11 +165,12 @@ def query_llm_batch(prompts, max_new_tokens=1200):
             **encodings,
             max_new_tokens=max_new_tokens,
             do_sample=False,
-#            top_p=0.9,
-#            temperature=0.7,
             pad_token_id=tokenizer.eos_token_id,
-#            repetition_penalty=1.15,
-#            no_repeat_ngram_size=3,
+            # 你可以按需打开下面这几项：
+            # repetition_penalty=1.2,
+            # no_repeat_ngram_size=3,
+            # top_p=0.9,
+            # temperature=0.7,
         )
 
     results = []
@@ -151,12 +179,13 @@ def query_llm_batch(prompts, max_new_tokens=1200):
         gen_ids = outputs[i][input_len:]
         text = tokenizer.decode(gen_ids, skip_special_tokens=True)
         results.append(process_response(text))
+
     return results
 
 # 加载数据
 df = pd.read_excel("./input/joined_condition.xlsx")
 try:
-    df_out = pd.read_excel("./output/joined_condition_DSlv2_batch8.xlsx")
+    df_out = pd.read_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx")
     processed_indices = set(df_out.index[df_out['response'].notna()])
     print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
 except FileNotFoundError:
@@ -200,7 +229,7 @@ for start_idx in range(0, total, batch_size):
     elapsed = time.time() - start_time
     torch.cuda.empty_cache()
     gc.collect()
-    time.sleep(0.5) #确保显存释放干净
+    time.sleep(1) #确保显存释放干净（秒），如果还有爆显存的情况就加到1.25
     print(f"DeepSeek_lv2已完成 {completed}/{total} 条，耗时 {elapsed:.2f} 秒")
 
     # 在显存大于 40GB 时释放显存
@@ -212,14 +241,14 @@ for start_idx in range(0, total, batch_size):
             gc.collect()
 
     if completed % 8 == 0:
-        df_out.to_excel("./output/joined_condition_DSlv2_batch8.xlsx", index=False)
+        df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
 
 
-df_out.to_excel("./output/joined_condition_DSlv2_batch8.xlsx", index=False)
+df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
 
 if error_records:
     df_error = pd.DataFrame(error_records, columns=["index", "prompt", "error"])
-    df_error.to_excel("./output/deepseek_errors_batch10.xlsx", index=False)
-    print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errors_batch10.xlsx")
+    df_error.to_excel("./output/DS_lv2_cut/deepseek_errors_cut.xlsx", index=False)
+    print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errors_batch8.xlsx")
 
 print("#### 所有任务处理完成 ####")
