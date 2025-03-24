@@ -156,7 +156,7 @@ def process_response(text):
 
     
 # 批处理部分
-def query_llm_batch(prompts, max_new_tokens=2048):
+def query_llm_batch(prompts, max_new_tokens=2200):
     MAX_INPUT_TOKENS = 8000
     MODEL_MAX_LENGTH = 16384
 
