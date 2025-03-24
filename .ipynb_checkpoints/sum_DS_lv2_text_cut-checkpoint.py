@@ -44,14 +44,14 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # System prompt
     system_content = (
-        "你是一名医疗文档整理机器人。\n"
-        "针对重复出现的数值信息（如血糖、血压），仅提取：\n"
-        "- 常见值或平均值\n"
-        "- 波动范围（最低值 ~ 最高值）\n"
-        "- 波动幅度（最高值 - 最低值）\n"
-        "缺项填“未提及”；描述性信息用“是否提及”或“整体情况”总结。\n"
-        "只对模版进行填充，输出不为四项被认为是不合格。\n"
-        "禁止分析、解释、推理、编造或中间过程，禁止说明文字、注释、图表或总结。\n"
+        "你是医疗文档结构抽取工具。\n"
+        "你的任务是严格按照用户提供的结构模板输出整理结果。"
+        "对频繁出现的数值，仅提取：\n"
+        "- 常见值 / 平均值\n"
+        "- 波动范围（最低 ~ 最高）\n"
+        "- 波动幅度（最高 - 最低）\n"
+        "缺失信息填“未提及”。\n"
+        "禁止输出：多余说明、分析、表格、注释、格式提示、模板重复。\n"
     )
     system_ids = tokenizer(system_content, return_tensors=None, add_special_tokens=False)["input_ids"]
 
@@ -61,14 +61,24 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # 构造结构模板后缀
     structure_suffix = (
-        "\n请将信息提取结果填入以下结构模板中。\n"
-    
-        "结构模版：\n\n"
+        "\n请将提取结果仅填入以下【结构模板】中。\n"
+
+        "【结构模板】：\n\n"
         "1. **血糖控制**\n"
         "- 空腹血糖波动情况：\n"
+        " - 平均值：\n"
+        " - 波动范围：\n"
+        " - 波动幅度：\n"
         "- 餐后血糖波动情况：\n"
+        " - 平均值：\n"
+        " - 波动范围：\n"
+        " - 波动幅度：\n"
         "- 症状：\n"
         "2. **血压管理**\n"
+        "- 收缩压：\n"
+        "- 舒张压：\n"
+        "- 空腹血压：\n"
+        "- 餐后血压：\n"
         "3. **依从性与监测问题**\n"
         "- 依从性：\n"
         "- 用药情况：\n"
@@ -76,6 +86,8 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
         "- 饮食：\n"
         "- 运动：\n"
         "- 体重变化：\n\n"
+
+        "\n【仅填写以上模板字段，输出到此为止。】"
     )
     suffix_ids = tokenizer(structure_suffix, return_tensors=None, add_special_tokens=False)["input_ids"]
 
@@ -105,19 +117,42 @@ def is_valid_output(output, min_sections=4):
     matched = [s for s in required_sections if s in output]
     return len(matched), len(matched) >= min_sections
 
-# 移除 <think> 部分
+# 后处理部分
 def process_response(text):
+    # 移除 <think> 部分
     marker = "</think>"
     pos = text.find(marker)
-    if pos == -1:
-        return text
-    end_index = pos + len(marker)
-    while end_index < len(text) and text[end_index] == "\n":
-        end_index += 1
-    return text[end_index:]
+    if pos != -1:
+        end_index = pos + len(marker)
+        while end_index < len(text) and text[end_index] == "\n":
+            end_index += 1
+        text = text[end_index:]
 
-from torch.nn.functional import pad
+    # 删除所有出现的“【结构模版】”或“【结构模板】”
+    text = text.replace("【结构模版】", "").replace("【结构模板】", "")
 
+    # 去除模型尾部意外重复模板
+    template_signals = [
+        "请根据提供的病情描述内容整理出结构化结果",
+        "结构模版：",
+        "请将提取结果"
+    ]
+    for key in template_signals:
+        if key in text:
+            text = text.split(key)[0].strip()
+
+    # 清洗重复 checklist 段
+    lines = text.splitlines()
+    deduped = []
+    seen = set()
+    for line in lines:
+        if line.strip() not in seen:
+            deduped.append(line)
+            seen.add(line.strip())
+
+    return "\n".join(deduped)
+
+# 批处理部分
 def query_llm_batch(prompts, max_new_tokens=2048):
     MAX_INPUT_TOKENS = 8000
     MODEL_MAX_LENGTH = 16384
@@ -193,7 +228,7 @@ except FileNotFoundError:
     df_out['status'] = ""
     processed_indices = set()
 
-batch_size = 10 #控制批次大小
+batch_size = 15 #控制批次大小
 error_records = []
 total = len(df)
 start_time = time.time()
@@ -239,7 +274,7 @@ for start_idx in range(0, total, batch_size):
 #            torch.cuda.empty_cache()
 #            gc.collect()
 
-    if completed % 10 == 0:
+    if completed % 15 == 0:
         df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
 
 
