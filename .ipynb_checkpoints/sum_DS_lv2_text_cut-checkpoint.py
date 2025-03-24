@@ -51,7 +51,6 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
         "- 波动幅度（最高值 - 最低值）\n"
         "缺项填“未提及”；描述性信息用“是否提及”或“整体情况”总结。\n"
         "禁止分析、解释、推理、编造或中间过程，禁止说明文字、注释或图表。\n"
-        "请严格按【结构模板】提取，不得添加任何非模板内容。\n"
     )
     system_ids = tokenizer(system_content, return_tensors=None, add_special_tokens=False)["input_ids"]
 
@@ -61,8 +60,8 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # 构造结构模板后缀
     structure_suffix = (
-        "\n请将提取结果**直接填入以下【结构模板】中**。\n"
-
+        "\n请将信息提取结果填入以下【结构模板】中。\n"
+    
         "【结构模版】：\n\n"
         "1. **血糖控制**\n"
         "- 空腹血糖波动情况：\n"
@@ -193,7 +192,7 @@ except FileNotFoundError:
     df_out['status'] = ""
     processed_indices = set()
 
-batch_size = 8
+batch_size = 10 #控制批次大小
 error_records = []
 total = len(df)
 start_time = time.time()
@@ -239,7 +238,7 @@ for start_idx in range(0, total, batch_size):
 #            torch.cuda.empty_cache()
 #            gc.collect()
 
-    if completed % 8 == 0:
+    if completed % 10 == 0:
         df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
 
 
