@@ -44,13 +44,14 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # System prompt
     system_content = (
-        "你是一名经验丰富的医疗文档整理专家。\n"
+        "你是一名医疗文档整理机器人。\n"
         "针对重复出现的数值信息（如血糖、血压），仅提取：\n"
         "- 常见值或平均值\n"
         "- 波动范围（最低值 ~ 最高值）\n"
         "- 波动幅度（最高值 - 最低值）\n"
         "缺项填“未提及”；描述性信息用“是否提及”或“整体情况”总结。\n"
-        "禁止分析、解释、推理、编造或中间过程，禁止说明文字、注释或图表。\n"
+        "只对模版进行填充，输出不为四项被认为是不合格。\n"
+        "禁止分析、解释、推理、编造或中间过程，禁止说明文字、注释、图表或总结。\n"
     )
     system_ids = tokenizer(system_content, return_tensors=None, add_special_tokens=False)["input_ids"]
 
@@ -60,9 +61,9 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # 构造结构模板后缀
     structure_suffix = (
-        "\n请将信息提取结果填入以下【结构模板】中。\n"
+        "\n请将信息提取结果填入以下结构模板中。\n"
     
-        "【结构模版】：\n\n"
+        "结构模版：\n\n"
         "1. **血糖控制**\n"
         "- 空腹血糖波动情况：\n"
         "- 餐后血糖波动情况：\n"
