@@ -126,3 +126,14 @@ git push origin main
 - **输出图示：**
 
 ![lv2_text_cut_b15 输出图](./output_picture/DS_lv2_cut_output_b15.png)
+
+---
+
+## 📅 2025/3/29 - **Preparing**
+**- UPDATE!**
+
+### 更新内容
+
+1. 优化了文件结构，为接下来的模型连接做准备  
+2. 修改了所有文件的输出路径，准备了single和batch两个处理文件
+3. 删掉了旧的README

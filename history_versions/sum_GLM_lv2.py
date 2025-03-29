@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore") # 忽略下面的警告
 print("开始运行程序...")
 
 # 模型路径和设备
-model_name = "../autodl-tmp/glm-4-9b-chat" 
+model_name = "../../autodl-tmp/glm-4-9b-chat" 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # 加载模型和 tokenizer
@@ -157,12 +157,12 @@ def query_llm_batch(prompts, max_new_tokens=512, fallback=False):
     return results
 
 # 加载数据
-df = pd.read_excel("./input/joined_condition_500.xlsx")
+df = pd.read_excel("../input/joined_condition_500.xlsx")
 if 'patient_condition' not in df.columns:
     raise ValueError("Excel 文件中未找到 'patient_condition' 列，请检查文件格式。")
 
 try:
-    df_out = pd.read_excel("./output/joined_condition_summarized_500_GLM3.xlsx")
+    df_out = pd.read_excel("../output/joined_condition_summarized_500_GLM3.xlsx")
     processed_indices = set(df_out.index[df_out['response'].notna()])
     print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
 except FileNotFoundError:
@@ -214,7 +214,7 @@ for batch_ids in batched_indices:
     print(f"ChatGLM 批处理已完成 {completed}/{len(df)} 条，耗时 {elapsed:.2f} 秒")
 
     if completed % 20 == 0:
-        df_out.to_excel("./output/joined_condition_summarized_batch.xlsx", index=False)
+        df_out.to_excel("../output/joined_condition_summarized_batch.xlsx", index=False)
         torch.cuda.empty_cache()
         gc.collect()
     # 显存释放，不然一定会爆的
@@ -222,7 +222,7 @@ for batch_ids in batched_indices:
     gc.collect()
 
 # 最终保存
-df_out.to_excel("./output/joined_condition_summarized_batch.xlsx", index=False)
+df_out.to_excel("../output/joined_condition_summarized_batch.xlsx", index=False)
 
 if error_records:
     df_error = pd.DataFrame(error_records, columns=["index", "prompt", "error"])

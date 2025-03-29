@@ -7,7 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 print("开始运行程序...")
 
 # 模型路径和设备
-model_name = "../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"
+model_name = "../../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_attn_implementation():
@@ -154,9 +154,9 @@ def query_llm_batch(prompts, max_new_tokens=1200):
     return results
 
 # 加载数据
-df = pd.read_excel("./input/joined_condition.xlsx")
+df = pd.read_excel("../input/joined_condition.xlsx")
 try:
-    df_out = pd.read_excel("./output/joined_condition_DSlv2_batch8.xlsx")
+    df_out = pd.read_excel("../output/joined_condition_DSlv2_batch8.xlsx")
     processed_indices = set(df_out.index[df_out['response'].notna()])
     print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
 except FileNotFoundError:
@@ -212,14 +212,14 @@ for start_idx in range(0, total, batch_size):
             gc.collect()
 
     if completed % 8 == 0:
-        df_out.to_excel("./output/joined_condition_DSlv2_batch8.xlsx", index=False)
+        df_out.to_excel("../output/joined_condition_DSlv2_batch8.xlsx", index=False)
 
 
-df_out.to_excel("./output/joined_condition_DSlv2_batch8.xlsx", index=False)
+df_out.to_excel("../output/joined_condition_DSlv2_batch8.xlsx", index=False)
 
 if error_records:
     df_error = pd.DataFrame(error_records, columns=["index", "prompt", "error"])
-    df_error.to_excel("./output/deepseek_errors_batch10.xlsx", index=False)
+    df_error.to_excel("../output/deepseek_errors_batch10.xlsx", index=False)
     print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errors_batch10.xlsx")
 
 print("#### 所有任务处理完成 ####")

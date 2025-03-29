@@ -7,7 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 print("开始运行程序...")
 
 # 模型加载
-model_name = "../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"
+model_name = "../../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
@@ -91,13 +91,13 @@ def process_response(text):
     return text[end_index:]
 
 # 读取并处理数据
-df = pd.read_excel("./input/joined_condition_500.xlsx")
+df = pd.read_excel("../input/joined_condition_500.xlsx")
 if 'patient_condition' not in df.columns:
     raise ValueError("Excel 文件中未找到 'patient_condition' 列，请检查文件格式。")
 
 # 若存在中途保存的结果，加载并跳过已完成部分
 try:
-    df_out = pd.read_excel("./output/joined_condition_summarized_500_DS.xlsx")
+    df_out = pd.read_excel("../output/joined_condition_summarized_500_DS.xlsx")
     processed_indices = set(df_out.index[df_out['response'].notna()])
     print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
 except FileNotFoundError:
@@ -130,8 +130,8 @@ for i, row in df.iterrows():
 
     # 每 5 条保存一次
     if completed % 5 == 0:
-        df_out.to_excel("./output/joined_condition_summarized_500_DS.xlsx", index=False)
+        df_out.to_excel("../output/joined_condition_summarized_500_DS.xlsx", index=False)
 
 # 最终保存
-df_out.to_excel("./output/joined_condition_summarized_500_DS.xlsx", index=False)
+df_out.to_excel("../output/joined_condition_summarized_500_DS.xlsx", index=False)
 print("#####FINISHIED!#####")

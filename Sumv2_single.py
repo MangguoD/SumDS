@@ -1,3 +1,4 @@
+# 这个是DS模拟用户输入进行处理的单条处理代码。
 import time
 import torch
 import pandas as pd
@@ -155,47 +156,26 @@ def process_response(text):
     return "\n".join(deduped)
 
     
-# 批处理部分
-def query_llm_batch(prompts, max_new_tokens=2200):
+# 单条处理部分
+def query_llm_single(raw_text, max_new_tokens=2200):
     MAX_INPUT_TOKENS = 8000
     MODEL_MAX_LENGTH = 16384
 
-    input_ids_list = []
-    attention_mask_list = []
+    full_ids = build_prompt_tokens(raw_text, tokenizer, MAX_INPUT_TOKENS)
+    total_len = len(full_ids)
 
-    for idx, raw in enumerate(prompts):
-        full_ids = build_prompt_tokens(raw, tokenizer, MAX_INPUT_TOKENS)
-        total_len = len(full_ids)
+    if total_len + max_new_tokens > MODEL_MAX_LENGTH:
+        allowed = MODEL_MAX_LENGTH - max_new_tokens
+        print(f"[硬性截断] prompt 总 token 数为 {total_len}，超过最大值 {MODEL_MAX_LENGTH - max_new_tokens}，截为前 {allowed} 个 token")
+        full_ids = full_ids[:allowed]
 
-        #安全检查
-        if total_len + max_new_tokens > MODEL_MAX_LENGTH:
-            allowed = MODEL_MAX_LENGTH - max_new_tokens
-            print(f"[硬性截断] 第 {idx} 条 prompt 总 token 数为 {total_len}，超过最大值 {MODEL_MAX_LENGTH - max_new_tokens}，截为前 {allowed} 个 token")
-            full_ids = full_ids[:allowed]
-        input_ids = torch.tensor(full_ids)
-        assert input_ids.shape[0] + max_new_tokens <= MODEL_MAX_LENGTH, \
-            f"[严重错误] 第 {idx} 条仍然超长：{input_ids.shape[0] + max_new_tokens} > {MODEL_MAX_LENGTH}"
+    input_ids = torch.tensor(full_ids)
+    attention_mask = torch.ones_like(input_ids)
 
-        attention_mask = torch.ones_like(input_ids)
-        input_ids_list.append(input_ids)
-        attention_mask_list.append(attention_mask)
-
-    # 左 padding
-    def left_pad(tensor, target_len, pad_value):
-        pad_len = target_len - tensor.size(0)
-        if pad_len <= 0:
-            return tensor
-        return pad(tensor, (pad_len, 0), value=pad_value)
-
-    max_len = max(seq.size(0) for seq in input_ids_list)
-
-    input_ids_padded = torch.stack([
-        left_pad(seq, max_len, tokenizer.pad_token_id) for seq in input_ids_list
-    ])
-
-    attention_mask_padded = torch.stack([
-        left_pad(seq, max_len, 0) for seq in attention_mask_list
-    ])
+    # 左 padding（这里只处理单条，因此不用 stack）
+    max_len = input_ids.size(0)
+    input_ids_padded = pad(input_ids, (0, 0), value=tokenizer.pad_token_id).unsqueeze(0)
+    attention_mask_padded = pad(attention_mask, (0, 0), value=0).unsqueeze(0)
 
     encodings = {
         "input_ids": input_ids_padded.to(device),
@@ -210,14 +190,31 @@ def query_llm_batch(prompts, max_new_tokens=2200):
             pad_token_id=tokenizer.eos_token_id,
         )
 
-    results = []
-    input_lengths = (encodings["attention_mask"] == 1).sum(dim=1)
-    for i, input_len in enumerate(input_lengths):
-        gen_ids = outputs[i][input_len:]
-        text = tokenizer.decode(gen_ids, skip_special_tokens=True)
-        results.append(process_response(text))
+    input_len = (encodings["attention_mask"] == 1).sum(dim=1)[0]
+    gen_ids = outputs[0][input_len:]
+    text = tokenizer.decode(gen_ids, skip_special_tokens=True)
+    return process_response(text)
 
-    return results
+
+# 输入部分
+print("\n请输入患者病情描述（输入 q 回车退出）：")
+while True:
+    raw = input("\n📝 患者情况：\n")
+    if raw.lower() in ['q', 'quit', 'exit']:
+        break
+    try:
+        result = query_llm_single(raw)
+        matched_count, is_valid = is_valid_output(result)
+        print("\n🧾 模型输出：\n")
+        print(result)
+        print(f"\n✅ 匹配字段数：{matched_count}，状态：{'FULL' if is_valid else 'PARTIAL' if matched_count >= 2 else 'FAIL'}")
+    except Exception as e:
+        print(f"[❌ 错误] 处理失败：{e}")
+
+    # 显存清理
+    torch.cuda.empty_cache()
+    gc.collect()
+
 
 # 加载数据
 df = pd.read_excel("./input/joined_condition.xlsx")
