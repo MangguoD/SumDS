@@ -29,7 +29,7 @@ tokenizer = AutoTokenizer.from_pretrained(
 )
 
 # 新增封装函数：供外部调用
-def load_model_and_tokenizer():
+def load_model_and_tokenizer_7b():
     return model, tokenizer
 
 model = AutoModelForCausalLM.from_pretrained(
