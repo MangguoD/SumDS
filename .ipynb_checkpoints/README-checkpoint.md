@@ -137,3 +137,11 @@ git push origin main
 1. 优化了文件结构，为接下来的模型连接做准备  
 2. 修改了所有文件的输出路径，准备了single和batch两个处理文件
 3. 删掉了旧的README
+
+---
+
+## 📅 2025/4/7 - **Preparing**
+**- UPDATE!**
+
+### 更新内容
+1. 更改了single的代码结构，现在已经可以服务于workflow调用

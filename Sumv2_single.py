@@ -278,14 +278,6 @@ for start_idx in range(0, total, batch_size):
     time.sleep(1) #确保显存释放干净（秒），如果还有爆显存的情况就加到1.25
     print(f"DeepSeek_lv2已完成 {completed}/{total} 条，耗时 {elapsed:.2f} 秒")
 
-    # 在显存大于 40GB 时释放显存
-#    if torch.cuda.is_available():
-#        current_mem = torch.cuda.memory_allocated() / (1024 ** 3)
-#        if current_mem > 40:
-#            print(f"[显存释放] 当前占用约 {current_mem:.2f} GB，执行释放...")
-#            torch.cuda.empty_cache()
-#            gc.collect()
-
     if completed % 15 == 0:
         df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
 
