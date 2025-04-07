@@ -28,6 +28,10 @@ tokenizer = AutoTokenizer.from_pretrained(
     padding_side="left"  # 必须在这里设置
 )
 
+# 新增封装函数：供外部调用
+def load_model_and_tokenizer():
+    return model, tokenizer
+
 model = AutoModelForCausalLM.from_pretrained(
     model_name,
     trust_remote_code=True,
@@ -156,10 +160,16 @@ def process_response(text):
     return "\n".join(deduped)
 
     
-# 单条处理部分
-def query_llm_single(raw_text, max_new_tokens=2200):
+# 单条处理部分（全局参数方便提前加载模型）
+def query_llm_single(raw_text, max_new_tokens=2200, model=None, tokenizer=None):
     MAX_INPUT_TOKENS = 8000
     MODEL_MAX_LENGTH = 16384
+
+    # 兼容旧调用：允许不传模型参数（使用全局变量）
+    if model is None:
+        model = globals()["model"]
+    if tokenizer is None:
+        tokenizer = globals()["tokenizer"]
 
     full_ids = build_prompt_tokens(raw_text, tokenizer, MAX_INPUT_TOKENS)
     total_len = len(full_ids)
@@ -199,17 +209,17 @@ def query_llm_single(raw_text, max_new_tokens=2200):
 # 输入部分
 print("\n请输入患者病情描述（输入 q 回车退出）：")
 while True:
-    raw = input("\n📝 患者情况：\n")
+    raw = input("\n患者情况：\n")
     if raw.lower() in ['q', 'quit', 'exit']:
         break
     try:
         result = query_llm_single(raw)
         matched_count, is_valid = is_valid_output(result)
-        print("\n🧾 模型输出：\n")
+        print("\n模型输出：\n")
         print(result)
-        print(f"\n✅ 匹配字段数：{matched_count}，状态：{'FULL' if is_valid else 'PARTIAL' if matched_count >= 2 else 'FAIL'}")
+        print(f"\n匹配字段数：{matched_count}，状态：{'FULL' if is_valid else 'PARTIAL' if matched_count >= 2 else 'FAIL'}")
     except Exception as e:
-        print(f"[❌ 错误] 处理失败：{e}")
+        print(f"[错误] 处理失败：{e}")
 
     # 显存清理
     torch.cuda.empty_cache()
