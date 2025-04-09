@@ -145,3 +145,18 @@ git push origin main
 
 ### 更新内容
 1. 更改了single的代码结构，现在已经可以服务于workflow调用
+
+## 📅 2025/4/7 - **Preparing**
+**- UPDATE!**
+
+### 更新内容
+1. 更改了batch的提示词，优化了部分代码，现在有更高的输出准确率和更好的显存释放效果
+2. 在H20上，稳定的batch size为40
+
+### ⏱ 表现提升
+
+- **准确率提升至 98.9%**
+- **换用H20显卡后速度提升至5h/2270条**
+- **输出图示：**
+
+![lv2_text_cut_b15 输出图](./output_picture/DS_lv2_cut_output_b40.png)

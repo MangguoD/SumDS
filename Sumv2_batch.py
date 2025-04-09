@@ -66,6 +66,7 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
         "【结构模板】：\n\n"
         "1. **血糖控制**\n"
+        "- 糖化血蛋白：\n"
         "- 空腹血糖波动情况：\n"
         " - 平均值：\n"
         " - 波动范围：\n"
@@ -80,14 +81,18 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
         "- 舒张压：\n"
         "- 空腹血压：\n"
         "- 餐后血压：\n"
-        "3. **依从性与监测问题**\n"
+        "3. **其他并发症**\n"
+        "- 眼底：\n"
+        "- 其他：\n"
+        "4. **依从性与监测问题**\n"
         "- 依从性：\n"
         "- 用药情况：\n"
-        "4. **生活方式**\n"
+        "5. **生活方式**\n"
+        "- BMI：\n"
         "- 饮食：\n"
         "- 运动：\n"
         "- 体重变化：\n\n"
-
+        
         "\n【仅填写以上模板字段，输出到此为止。】"
     )
     suffix_ids = tokenizer(structure_suffix, return_tensors=None, add_special_tokens=False)["input_ids"]
@@ -109,10 +114,11 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
 
 # 检查输出结构完整性
-def is_valid_output(output, min_sections=4):
+def is_valid_output(output, min_sections=5):
     required_sections = [
         "**血糖控制**",
         "**血压管理**",
+        "**其他并发症**",
         "**依从性与监测问题**",
         "**生活方式**"
     ]
@@ -221,9 +227,9 @@ def query_llm_batch(prompts, max_new_tokens=2200):
     return results
 
 # 加载数据
-df = pd.read_excel("./input/joined_condition.xlsx")
+df = pd.read_excel("./input/errorsbatch.xlsx")
 try:
-    df_out = pd.read_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx")
+    df_out = pd.read_excel("./output/DS_lv2_cut/errorsbatch_fix.xlsx")
     processed_indices = set(df_out.index[df_out['response'].notna()])
     print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
 except FileNotFoundError:
@@ -232,7 +238,8 @@ except FileNotFoundError:
     df_out['status'] = ""
     processed_indices = set()
 
-batch_size = 15 #控制批次大小
+batch_size = 40 #控制批次大小
+# 若是A40，将批大小改为15
 error_records = []
 total = len(df)
 start_time = time.time()
@@ -280,15 +287,15 @@ for start_idx in range(0, total, batch_size):
 #            torch.cuda.empty_cache()
 #            gc.collect()
 
-    if completed % 15 == 0:
-        df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
+    if completed % 10 == 0:
+        df_out.to_excel("./output/DS_lv2_cut/errorsbatch_fix.xlsx", index=False)
 
 
-df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
+df_out.to_excel("./output/DS_lv2_cut/errorsbatch_fix.xlsx", index=False)
 
 if error_records:
     df_error = pd.DataFrame(error_records, columns=["index", "prompt", "error"])
-    df_error.to_excel("./output/DS_lv2_cut/deepseek_errors_cut.xlsx", index=False)
-    print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errors_batch8.xlsx")
+    df_error.to_excel("./output/DS_lv2_cut/errorsbatch_fixfail.xlsx", index=False)
+    print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errorsbatch.xlsx")
 
 print("#### 所有任务处理完成 ####")
