@@ -1,18 +1,23 @@
-# 这个是DS模拟用户输入进行处理的单条处理代码。
+# Sumv2_single.py for workflow
+import os
 import time
 import torch
-import pandas as pd
 import gc
+import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import warnings
 from torch.nn.functional import pad  # 左padding库
 
-warnings.filterwarnings("ignore") # 忽略警告,无视风险,继续运行
+warnings.filterwarnings("ignore")  # 忽略警告,无视风险,继续运行
 
-print("开始运行程序...")
+# 配置日志，将每次调用的输入及响应写入 workflow_input.log 文件
+logging.basicConfig(
+    filename="workflow_input.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
-# 模型路径和设备
-model_name = "../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"
+# 模型设备配置
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_attn_implementation():
@@ -21,32 +26,47 @@ def get_attn_implementation():
 
 attn_impl = get_attn_implementation()
 
-# 模型加载 左截断
-tokenizer = AutoTokenizer.from_pretrained(
-    model_name,
-    trust_remote_code=True,
-    padding_side="left"  # 必须在这里设置
-)
+# 全局变量：模型和 tokenizer（在加载后赋值）
+model = None
+tokenizer = None
 
-# 新增封装函数：供外部调用
-def load_model_and_tokenizer_7b():
+# 封装函数：加载 DeepSeek-7B 模型和 tokenizer（仅从本地路径）
+def load_model_and_tokenizer_7b(model_path: str = None):
+    """
+    加载 DeepSeek-7B 模型及对应的 tokenizer。
+    参数:
+      model_path: 模型本地路径目录。如果为 None，则使用默认路径。
+    返回:
+      (model, tokenizer) 元组。
+    """
+    global model, tokenizer
+    # 默认模型路径
+    if model_path is None:
+        model_path = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../autodl-tmp/DeepSeek-R1-Distill-Qwen-7B"))
+    if not os.path.isdir(model_path):
+        raise FileNotFoundError(f"[错误] 模型路径不存在：{model_path}")
+    # 从本地路径加载 tokenizer 和模型，禁止联网
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        local_files_only=True,
+        padding_side="left"
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+        local_files_only=True,
+        torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
+        device_map="auto" if device.type == "cuda" else None,
+        attn_implementation=attn_impl if device.type == "cuda" else None
+    ).to(device).eval()
     return model, tokenizer
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    trust_remote_code=True,
-    torch_dtype=torch.float16 if device.type == "cuda" else torch.float32,
-    device_map="auto" if device.type == "cuda" else None,
-    attn_implementation=attn_impl if device.type == "cuda" else None
-).to(device).eval()
-
-# 构造提示词
 def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
     """
     构建完整 prompt 并自动按 token 截断 raw_text，以确保总长不超过 max_input_tokens
     返回: input_ids（List[int]）
     """
-
     # System prompt
     system_content = (
         "你是医疗文档结构抽取工具。\n"
@@ -66,10 +86,10 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
 
     # 构造结构模板后缀
     structure_suffix = (
-        "\n请将提取结果仅填入以下【结构模板】中。\n"
-
-        "【结构模板】：\n\n"
+        "\n请将提取结果仅填入以下结构模板中。\n"
+        "\n结构模板：\n\n"
         "1. **血糖控制**\n"
+        "- 糖化血蛋白：\n"
         "- 空腹血糖波动情况：\n"
         " - 平均值：\n"
         " - 波动范围：\n"
@@ -84,19 +104,22 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
         "- 舒张压：\n"
         "- 空腹血压：\n"
         "- 餐后血压：\n"
-        "3. **依从性与监测问题**\n"
+        "3. **其他并发症**\n"
+        "- 眼底：\n"
+        "- 其他：\n"
+        "4. **依从性与监测问题**\n"
         "- 依从性：\n"
         "- 用药情况：\n"
-        "4. **生活方式**\n"
+        "5. **生活方式**\n"
+        "- BMI：\n"
         "- 饮食：\n"
         "- 运动：\n"
         "- 体重变化：\n\n"
-
-        "\n【仅填写以上模板字段，输出到此为止。】"
+        "\n仅填写以上模板字段，输出到此为止。"
     )
     suffix_ids = tokenizer(structure_suffix, return_tensors=None, add_special_tokens=False)["input_ids"]
 
-    # 给 raw_text 剩下的 token budget
+    # 给 raw_text 剩下的 token 留下预算
     reserved = len(system_ids) + len(prefix_ids) + len(suffix_ids)
     available_budget = max_input_tokens - reserved
     if available_budget <= 0:
@@ -111,20 +134,17 @@ def build_prompt_tokens(raw_text, tokenizer, max_input_tokens):
     full_ids = system_ids + prefix_ids + raw_text_ids + suffix_ids
     return full_ids
 
-
-# 检查输出结构完整性
-def is_valid_output(output, min_sections=4):
+def is_valid_output(output, min_sections=5):
     required_sections = [
         "**血糖控制**",
         "**血压管理**",
+        "**其他并发症**",
         "**依从性与监测问题**",
         "**生活方式**"
     ]
     matched = [s for s in required_sections if s in output]
     return len(matched), len(matched) >= min_sections
 
-
-# 后处理部分
 def process_response(text):
     # 移除 <think> 部分
     marker = "</think>"
@@ -135,8 +155,8 @@ def process_response(text):
             end_index += 1
         text = text[end_index:]
 
-    # 删除所有出现的“【结构模版】”或“【结构模板】”
-    text = text.replace("【结构模版】", "").replace("【结构模板】", "")
+    # 删除所有出现的“结构模版”或“结构模板”
+    text = text.replace("结构模版", "").replace("结构模板", "")
 
     # 去除模型尾部意外重复模板
     template_signals = [
@@ -156,14 +176,14 @@ def process_response(text):
         if line.strip() not in seen:
             deduped.append(line)
             seen.add(line.strip())
-
     return "\n".join(deduped)
 
-    
-# 单条处理部分（全局参数方便提前加载模型）
 def query_llm_single(raw_text, max_new_tokens=2200, model=None, tokenizer=None):
     MAX_INPUT_TOKENS = 8000
     MODEL_MAX_LENGTH = 16384
+
+    # 记录输入日志
+    logging.info("输入文本：" + raw_text)
 
     # 兼容旧调用：允许不传模型参数（使用全局变量）
     if model is None:
@@ -183,7 +203,6 @@ def query_llm_single(raw_text, max_new_tokens=2200, model=None, tokenizer=None):
     attention_mask = torch.ones_like(input_ids)
 
     # 左 padding（这里只处理单条，因此不用 stack）
-    max_len = input_ids.size(0)
     input_ids_padded = pad(input_ids, (0, 0), value=tokenizer.pad_token_id).unsqueeze(0)
     attention_mask_padded = pad(attention_mask, (0, 0), value=0).unsqueeze(0)
 
@@ -203,90 +222,33 @@ def query_llm_single(raw_text, max_new_tokens=2200, model=None, tokenizer=None):
     input_len = (encodings["attention_mask"] == 1).sum(dim=1)[0]
     gen_ids = outputs[0][input_len:]
     text = tokenizer.decode(gen_ids, skip_special_tokens=True)
-    return process_response(text)
+    processed_text = process_response(text)
 
+    # 记录处理结果日志
+    logging.info("处理结果：" + processed_text)
+    return processed_text
 
-# 输入部分
-print("\n请输入患者病情描述（输入 q 回车退出）：")
-while True:
-    raw = input("\n患者情况：\n")
-    if raw.lower() in ['q', 'quit', 'exit']:
-        break
-    try:
-        result = query_llm_single(raw)
-        matched_count, is_valid = is_valid_output(result)
-        print("\n模型输出：\n")
-        print(result)
-        print(f"\n匹配字段数：{matched_count}，状态：{'FULL' if is_valid else 'PARTIAL' if matched_count >= 2 else 'FAIL'}")
-    except Exception as e:
-        print(f"[错误] 处理失败：{e}")
+# 如果直接运行该模块，则进入交互模式（仅作测试使用）
+if __name__ == "__main__":
+    print("开始加载DeepSeek-7B模型...")
+    model, tokenizer = load_model_and_tokenizer_7b()
+    print("请输入患者病情描述（输入 q 或空行退出）：")
+    while True:
+        raw = input("\n患者情况：\n")
+        if raw.lower() in ['q', 'quit', 'exit'] or raw.strip() == "":
+            break
+        try:
+            result = query_llm_single(raw)
+            matched_count, is_valid = is_valid_output(result)
+            print("\n模型输出：\n")
+            print(result)
+            print(f"\n匹配字段数：{matched_count}，状态：{'FULL' if is_valid else 'PARTIAL' if matched_count >= 2 else 'FAIL'}")
+        except Exception as e:
+            error_msg = f"[错误] 处理失败：{e}"
+            print(error_msg)
+            logging.error(error_msg)
 
-    # 显存清理
-    torch.cuda.empty_cache()
-    gc.collect()
+        torch.cuda.empty_cache()
+        gc.collect()
 
-
-# 加载数据
-df = pd.read_excel("./input/joined_condition.xlsx")
-try:
-    df_out = pd.read_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx")
-    processed_indices = set(df_out.index[df_out['response'].notna()])
-    print(f"检测到已有 {len(processed_indices)} 条已处理记录，将跳过这些记录。")
-except FileNotFoundError:
-    df_out = df.copy()
-    df_out['response'] = ""
-    df_out['status'] = ""
-    processed_indices = set()
-
-batch_size = 15 #控制批次大小
-error_records = []
-total = len(df)
-start_time = time.time()
-
-# 标记输出情况，保留错误或截断输出，方便统计
-for start_idx in range(0, total, batch_size):
-    end_idx = min(start_idx + batch_size, total)
-    batch_indices = [i for i in range(start_idx, end_idx) if i not in processed_indices]
-    if not batch_indices:
-        continue
-
-    batch_prompts = [str(df.loc[i, 'patient_condition']) for i in batch_indices]
-
-    try:
-        batch_outputs = query_llm_batch(batch_prompts)
-        for i, output in zip(batch_indices, batch_outputs):
-            matched_count, is_valid = is_valid_output(output)
-            df_out.at[i, 'response'] = output
-            if is_valid:
-                df_out.at[i, 'status'] = "FULL"
-            elif matched_count >= 2:
-                df_out.at[i, 'status'] = f"PARTIAL_{matched_count}"
-            else:
-                df_out.at[i, 'status'] = "FAIL"
-                error_records.append((i, batch_prompts[i - start_idx], output))
-    except Exception as e:
-        for i in batch_indices:
-            df_out.at[i, 'response'] = f"[ERROR] {e}"
-            df_out.at[i, 'status'] = "ERROR"
-            error_records.append((i, df.loc[i, 'patient_condition'], str(e)))
-
-    completed = end_idx
-    elapsed = time.time() - start_time
-    # 释放显存（这段真的很重要）
-    torch.cuda.empty_cache()
-    gc.collect()
-    time.sleep(1) #确保显存释放干净（秒），如果还有爆显存的情况就加到1.25
-    print(f"DeepSeek_lv2已完成 {completed}/{total} 条，耗时 {elapsed:.2f} 秒")
-
-    if completed % 15 == 0:
-        df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
-
-
-df_out.to_excel("./output/DS_lv2_cut/joined_DSlv2_text_cut.xlsx", index=False)
-
-if error_records:
-    df_error = pd.DataFrame(error_records, columns=["index", "prompt", "error"])
-    df_error.to_excel("./output/DS_lv2_cut/deepseek_errors_cut.xlsx", index=False)
-    print(f"有 {len(error_records)} 条数据处理失败，详见 deepseek_errors_batch8.xlsx")
-
-print("#### 所有任务处理完成 ####")
+    print("#### 所有任务处理完成 ####")
