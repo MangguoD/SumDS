@@ -1,5 +1,4 @@
 # 🧪 简单使用教程
-如果使用 **GLM**，请更换为其对应的虚拟环境
 > 首先激活该**模型**的虚拟环境：
 
 ```bash
@@ -8,13 +7,9 @@ conda deactivate
 python summarization_DS.py
 ```
 
-### 注意事项
-- `V100` **不支持** `flash-attention`
-- `flash-attention` 需要提前在虚拟环境内编译  
-（ 如果服务器总挂，可以晚上尝试）
 
 ### 激活 GLM 虚拟环境
-
+如果使用 **GLM**，请更换为其对应的虚拟环境
 ```bash
 source /root/DiabetesPDiagLLM/.diabetesPDiagLLMVenv/bin/activates
 ```
@@ -148,3 +143,7 @@ git push origin main
 - **输出图示：**
 
 ![lv2_text_cut_b15 输出图](./output_picture/DS_lv2_cut_output_b40.png)
+
+## Author
+
+[MangguoD](https://github.com/MangguoD)

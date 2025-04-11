@@ -1,4 +1,5 @@
-# 这个是DS_lv2_text_cut的改名副本
+# Author: MangguoD
+
 import time
 import torch
 import pandas as pd
